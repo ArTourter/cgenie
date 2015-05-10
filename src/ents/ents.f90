@@ -56,8 +56,7 @@ CONTAINS
     NAMELIST /ents_control/ ents_npstp, ents_iwstp
     NAMELIST /ents_control/ ents_itstp, ents_ianav
     NAMELIST /ents_control/ ents_restart, ents_yearlen
-    NAMELIST /ents_control/ ents_out_name, ents_netin
-    NAMELIST /ents_control/ ents_netout, ents_ascout, ents_filenetin
+    NAMELIST /ents_control/ ents_out_name, ents_filenetin
     NAMELIST /ents_control/ ents_dirnetout, rstdir_name
     NAMELIST /ents_control/ ents_restart_file
     NAMELIST /ents_control/ dosc
@@ -281,9 +280,6 @@ CONTAINS
 
     REAL :: Cveg_ini, Csoil_ini, fv_ini, photo_ini, fws, fta, fco2, rland_pts
     REAL :: z0_ini
-    INTEGER :: isdump
-    CHARACTER(LEN=30) :: dumpfl
-    CHARACTER(LEN=200) :: filename
 
     ! pbh k_constants are no longer read in from "k_constants.dat" but
     ! are now namelist paramaters k21 is now hard-wired. This is the
@@ -427,30 +423,7 @@ CONTAINS
 
     ! Continue run
     IF (ents_restart == 'c' .OR. ents_restart == 'C') THEN
-       IF (ents_netin == 'y' .OR. ents_netin == 'Y') THEN
-          CALL in_ents_netcdf(ents_filenetin, land_snow_lnd)
-       ELSE
-          filename = indir_name(1:lenin) // TRIM(ents_restart_file)
-          OPEN(1,FILE=TRIM(filename))
-          CALL in_ents_ascii(1, land_snow_lnd)
-
-          ! Continue ENTS from a different .sland file
-          READ (66,*) isdump
-          PRINT *, 'Continue run from different .sland file? (0=N 1=Y)', isdump
-          READ (66,'(a35)') dumpfl
-          IF (isdump == 1) THEN
-             PRINT *, 'Different land restart file name is'
-             PRINT *, dumpfl
-             OPEN(1,FILE=TRIM(dumpfl),STATUS='old')
-             PRINT *, 'ENTS restart file is ', dumpfl
-             CALL in_ents_ascii(1, land_snow_lnd)
-             CLOSE(1)
-          ELSE
-             PRINT *, 'ENTS restart file is ', filename
-          END IF
-          CLOSE(66)
-          CLOSE(1)
-       END IF
+       CALL in_ents_netcdf(ents_filenetin, land_snow_lnd)
     END IF
 
     ! Initialise sealevel module
@@ -517,7 +490,7 @@ CONTAINS
     REAL, DIMENSION(:,:,:), INTENT(INOUT) :: sfxatm_lnd
 
     INTEGER :: itv, iout, i, j, istot
-    CHARACTER(LEN=200) :: filename, fname, label
+    CHARACTER(LEN=200) :: fname, label
 
     REAL, DIMENSION(:,:,:), ALLOCATABLE :: var_data
     CHARACTER(LEN=8), DIMENSION(10) :: labels = &
@@ -563,91 +536,73 @@ CONTAINS
 
     ! Write ENTS restarts
     IF (MOD(istep, ents_iwstp) == 0) THEN
-       IF (ents_ascout == 'y' .OR. ents_ascout == 'Y') THEN
-          PRINT *, 'Writing ENTS restart file'
-          filename = TRIM(outdir_name) // TRIM(ents_out_name) // '.sland'
-          OPEN(3,FILE=TRIM(filename))
-          REWIND(3)
-          CALL out_ents(3, land_snow_lnd)
-          CLOSE(3)
+       inistep = INT(ents_nyear * iniday / ents_yearlen) + istep
+       myyear = INT(inistep / ents_nyear)
+       mymonth = INT(12 * MOD(inistep, ents_nyear) / ents_nyear)
+       myday = INT(ents_yearlen * inistep / ents_nyear - &
+            & mymonth * (ents_yearlen / 12) - myyear * ents_yearlen)
+
+       IF (MOD(ents_iwstp, ents_nyear) == 0) THEN
+          fname = TRIM(outdir_name) // TRIM(ents_out_name) // &
+               & '_restart_' // TRIM(ConvertFunc(myyear - 1, 10)) // &
+               & '_12_30.nc'
+       ELSE
+          fname = TRIM(outdir_name) // TRIM(ents_out_name) // &
+               & '_restart_' // &
+               & TRIM(ConvertFunc(myyear, 10)) // '_' // &
+               & TRIM(ConvertFunc(mymonth, 2)) // '_' // &
+               & TRIM(ConvertFunc(myday, 2)) // '.nc'
        END IF
 
-       IF (ents_netout == 'y' .OR. ents_netout == 'Y') THEN
-          IF (ents_netin == 'y' .OR. ents_netin == 'Y') THEN
-             inistep = INT(ents_nyear * iniday / ents_yearlen) + istep
-             myyear = INT(inistep / ents_nyear)
-             mymonth = INT(12 * MOD(inistep, ents_nyear) / ents_nyear)
-             myday = INT(ents_yearlen * inistep / ents_nyear - &
-                  & mymonth * (ents_yearlen / 12) - myyear * ents_yearlen)
-          ELSE
-             myyear = INT(istep / ents_nyear)
-             mymonth = INT(12 * MOD(istep, ents_nyear) / ents_nyear)
-             myday = INT(ents_yearlen * istep / ents_nyear - &
-                  & mymonth * (ents_yearlen / 12) - myyear * ents_yearlen)
-          END IF
+       INQUIRE(FILE=fname,EXIST=fexist)
+       IF (fexist) THEN
+          OPEN(8,FILE=fname,STATUS='old')
+          CLOSE(8,STATUS='delete')
+       END IF
 
-          IF (MOD(ents_iwstp, ents_nyear) == 0) THEN
-             fname = TRIM(outdir_name) // TRIM(ents_out_name) // &
-                  & '_restart_' // TRIM(ConvertFunc(myyear - 1, 10)) // &
-                  & '_12_30.nc'
-          ELSE
-             fname = TRIM(outdir_name) // TRIM(ents_out_name) // &
-                  & '_restart_' // &
-                  & TRIM(ConvertFunc(myyear, 10)) // '_' // &
-                  & TRIM(ConvertFunc(mymonth, 2)) // '_' // &
-                  & TRIM(ConvertFunc(myday, 2)) // '.nc'
-          END IF
-
-          INQUIRE(FILE=fname,EXIST=fexist)
-          IF (fexist) THEN
-             OPEN(8,FILE=fname,STATUS='old')
-             CLOSE(8,STATUS='delete')
-          END IF
-
-          DO kk = 1, 10
-             ALLOCATE(var_data(1,maxj,maxi))
-             label = labels(kk)
-             DO j = 1, maxj
-                DO i = 1, maxi
-                   SELECT CASE (kk)
-                   CASE (1)
-                      var_data(1,j,i) = photo(i,j)
-                   CASE (2)
-                      var_data(1,j,i) = respveg(i,j)
-                   CASE (3)
-                      var_data(1,j,i) = leaf(i,j)
-                   CASE (4)
-                      var_data(1,j,i) = respsoil(i,j)
-                   CASE (5)
-                      var_data(1,j,i) = Cveg(i,j)
-                   CASE (6)
-                      var_data(1,j,i) = Csoil(i,j)
-                   CASE (7)
-                      var_data(1,j,i) = fv(i,j)
-                   CASE (8)
-                      var_data(1,j,i) = tqld(1,i,j)
-                   CASE (9)
-                      var_data(1,j,i) = tqld(2,i,j)
-                   CASE (10)
-                      var_data(1,j,i) = land_snow_lnd(i,j)
-                   END SELECT
-                END DO
+       DO kk = 1, 10
+          ALLOCATE(var_data(1,maxj,maxi))
+          label = labels(kk)
+          DO j = 1, maxj
+             DO i = 1, maxi
+                SELECT CASE (kk)
+                CASE (1)
+                   var_data(1,j,i) = photo(i,j)
+                CASE (2)
+                   var_data(1,j,i) = respveg(i,j)
+                CASE (3)
+                   var_data(1,j,i) = leaf(i,j)
+                CASE (4)
+                   var_data(1,j,i) = respsoil(i,j)
+                CASE (5)
+                   var_data(1,j,i) = Cveg(i,j)
+                CASE (6)
+                   var_data(1,j,i) = Csoil(i,j)
+                CASE (7)
+                   var_data(1,j,i) = fv(i,j)
+                CASE (8)
+                   var_data(1,j,i) = tqld(1,i,j)
+                CASE (9)
+                   var_data(1,j,i) = tqld(2,i,j)
+                CASE (10)
+                   var_data(1,j,i) = land_snow_lnd(i,j)
+                END SELECT
              END DO
-             CALL netcdf_ents(fname, var_data, label, myday)
-             DEALLOCATE(var_data)
           END DO
+          CALL netcdf_ents(fname, var_data, label, myday)
+          DEALLOCATE(var_data)
+       END DO
 
-          ! Adding final restart value (single)
-          CALL check_err(NF90_OPEN(fname, NF90_WRITE, ncid))
-          CALL check_err(NF90_REDEF(ncid))
-          CALL check_err(NF90_DEF_DIM(ncid, 'pco2ld', 1, vardim_id))
-          CALL check_err(NF90_DEF_VAR(ncid, 'pco2ld', &
-               & NF90_FLOAT, (/ vardim_id /), var_id))
-          CALL check_err(NF90_PUT_ATT(ncid, var_id, 'long_name', 'pco2ld'))
-          CALL check_err(NF90_ENDDEF(ncid))
-          CALL check_err(NF90_PUT_VAR(ncid, var_id, pco2ld))
-          CALL check_err(NF90_CLOSE(ncid))
-       END IF
+       ! Adding final restart value (single)
+       CALL check_err(NF90_OPEN(fname, NF90_WRITE, ncid))
+       CALL check_err(NF90_REDEF(ncid))
+       CALL check_err(NF90_DEF_DIM(ncid, 'pco2ld', 1, vardim_id))
+       CALL check_err(NF90_DEF_VAR(ncid, 'pco2ld', &
+            & NF90_FLOAT, (/ vardim_id /), var_id))
+       CALL check_err(NF90_PUT_ATT(ncid, var_id, 'long_name', 'pco2ld'))
+       CALL check_err(NF90_ENDDEF(ncid))
+       CALL check_err(NF90_PUT_VAR(ncid, var_id, pco2ld))
+       CALL check_err(NF90_CLOSE(ncid))
     END IF
 
     IF (MOD(istep, ents_itstp) == 0) THEN
